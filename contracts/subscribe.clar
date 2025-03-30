@@ -50,7 +50,7 @@
 (define-public (subscribe (vendor principal) (fee-amount uint) (duration uint) (cycle uint))
     (let
         (
-            (current-block (unwrap-panic (get-stacks-block-info? time u0)))
+            (current-block (unwrap-panic (get-block-info? time u0)))
             (total-fee (* fee-amount (/ duration cycle)))
         )
         (asserts! (is-approved-vendor vendor) (err u15))
@@ -79,7 +79,7 @@
     (let
         (
             (plan-data (unwrap! (map-get? subscription-plans {customer: customer}) (err u1)))
-            (current-block (unwrap-panic (get-stacks-block-info? time u0)))
+            (current-block (unwrap-panic (get-block-info? time u0)))
             (subscription-id { customer: customer })
         )
         ;; Validate subscription exists and get data
@@ -103,7 +103,7 @@
     (let
         (
             (plan (unwrap! (map-get? subscription-plans {customer: tx-sender}) (err u1)))
-            (current-block (unwrap-panic (get-stacks-block-info? time u0)))
+            (current-block (unwrap-panic (get-block-info? time u0)))
             (blocks-remaining (- (get expiration-block plan) current-block))
             (min-blocks (* (var-get min-subscription-days) u144))
         )
