@@ -5,6 +5,7 @@
 (define-data-var admin principal tx-sender)
 (define-data-var min-subscription-days uint u30)
 (define-data-var cancellation-penalty-rate uint u100)
+(define-data-var referral-reward-rate uint u500) ;; 5% reward in basis points
 
 ;; Data Maps
 (define-map vendors
@@ -21,8 +22,27 @@
         expiration-block: uint,
         billing-cycle: uint,
         last-billing-block: uint,
-        is-valid: bool
+        is-valid: bool,
+        tier-id: uint,  ;; New field for subscription tier
+        referrer: (optional principal) ;; New field for tracking referrals
     }
+)
+
+;; New map for tiered pricing plans
+(define-map tier-pricing
+    { vendor-id: principal, tier-id: uint }
+    {
+        name: (string-ascii 50),
+        base-price: uint,
+        description: (string-ascii 200),
+        is-active: bool
+    }
+)
+
+;; New map for tracking referral rewards
+(define-map referral-rewards
+    { referrer: principal }
+    { total-earned: uint }
 )
 
 ;; Authorization Functions
@@ -46,32 +66,29 @@
     )
 )
 
-;; Public Functions
-(define-public (subscribe (vendor principal) (fee-amount uint) (duration uint) (cycle uint))
-    (let
-        (
-            (current-block (unwrap-panic (get-block-info? time u0)))
-            (total-fee (* fee-amount (/ duration cycle)))
-        )
-        (asserts! (is-approved-vendor vendor) (err u15))
-        (asserts! (> fee-amount u0) (err u5))
-        (asserts! (> duration u0) (err u6))
-        (asserts! (> cycle u0) (err u7))
-        (asserts! (>= duration cycle) (err u8))
-        (asserts! (not (is-eq vendor tx-sender)) (err u11))
-        (try! (stx-transfer? total-fee tx-sender (as-contract tx-sender)))
-        (ok (map-set subscription-plans
-            { customer: tx-sender }
+;; New function for vendors to create subscription tiers
+(define-public (create-subscription-tier (tier-id uint) (name (string-ascii 50)) (price uint) (description (string-ascii 200)))
+    (begin
+        (asserts! (is-approved-vendor tx-sender) (err u15))
+        (asserts! (> price u0) (err u5))
+        (asserts! (not (is-tier-active tx-sender tier-id)) (err u20))
+        (ok (map-set tier-pricing 
+            { vendor-id: tx-sender, tier-id: tier-id }
             {
-                vendor: vendor,
-                fee-amount: fee-amount,
-                activation-block: current-block,
-                expiration-block: (+ current-block duration),
-                billing-cycle: cycle,
-                last-billing-block: current-block,
-                is-valid: true
+                name: name,
+                base-price: price,
+                description: description,
+                is-active: true
             }
         ))
+    )
+)
+
+;; New function to check if a tier exists and is active
+(define-read-only (is-tier-active (vendor principal) (tier-id uint))
+    (match (map-get? tier-pricing { vendor-id: vendor, tier-id: tier-id })
+        tier-data (get is-active tier-data)
+        false
     )
 )
 
@@ -130,6 +147,10 @@
     (map-get? subscription-plans {customer: customer})
 )
 
+(define-read-only (get-tier-details (vendor principal) (tier-id uint))
+    (map-get? tier-pricing {vendor-id: vendor, tier-id: tier-id})
+)
+
 (define-read-only (get-minimum-subscription-period)
     (var-get min-subscription-days)
 )
@@ -138,12 +159,24 @@
     (var-get admin)
 )
 
+(define-read-only (get-referral-rewards (referrer principal))
+    (default-to { total-earned: u0 } (map-get? referral-rewards {referrer: referrer}))
+)
+
 ;; Admin Functions
 (define-public (update-minimum-period (new-period uint))
     (begin
         (asserts! (is-eq tx-sender (var-get admin)) (err u403))
         (asserts! (> new-period u0) (err u9))
         (ok (var-set min-subscription-days new-period))
+    )
+)
+
+(define-public (update-referral-rate (new-rate uint))
+    (begin
+        (asserts! (is-eq tx-sender (var-get admin)) (err u403))
+        (asserts! (<= new-rate u10000) (err u24)) ;; Can't exceed 100%
+        (ok (var-set referral-reward-rate new-rate))
     )
 )
 
